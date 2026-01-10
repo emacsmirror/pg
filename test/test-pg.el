@@ -398,7 +398,7 @@
       (pgtest-add #'pg-test-server-prepare
                   :skip-variants '(cratedb risingwave questdb greptimedb ydb octodb datafusion))
       (pgtest-add #'pg-test-comments
-                   :skip-variants '(ydb cratedb cockroachdb spanner questdb thenile cedardb datafusion))
+                   :skip-variants '(ydb cratedb spanner questdb thenile cedardb datafusion))
       (pgtest-add #'pg-test-metadata
                   :skip-variants '(cratedb cockroachdb risingwave materialize questdb greptimedb ydb spanner vertica datafusion))
       ;; CrateDB doesn't support the JSONB type. CockroachDB doesn't support casting to JSON.
@@ -2748,15 +2748,21 @@ bar$$"))))
   (let ((r (pg-exec-prepared con "SELECT $1 = $2" '(("á" . "text") ("á" . "text")))))
     (should (eql nil (cl-first (pg-result r :tuple 0))))))
 
+
 (defun pg-test-returning (con)
   (when (pgtest-have-table con "pgeltestr")
     (pg-exec con "DROP TABLE pgeltestr"))
   (pg-exec con (pgtest-massage con "CREATE TABLE pgeltestr(id INTEGER NOT NULL PRIMARY KEY, data TEXT)"))
   (let* ((res (pg-exec con "INSERT INTO pgeltestr VALUES (1, 'Foobles') RETURNING id"))
-         (id (cl-first (pg-result res :tuple 0)))
-         (_ (pgtest-flush-table con "pgeltestr"))
-         (res (pg-exec con (format "SELECT data from pgeltestr WHERE id=%s" id))))
-    (should (string= (car (pg-result res :tuple 0)) "Foobles")))
+         (id (cl-first (pg-result res :tuple 0))))
+    (should (eql 1 id)))
+  (let* ((res (pg-exec con "INSERT INTO pgeltestr VALUES (-66, 'Foobles') RETURNING id"))
+         (id (cl-first (pg-result res :tuple 0))))
+    (should (eql -66 id)))
+  (pgtest-flush-table con "pgeltestr")
+  (let* ((res (pg-exec con "SELECT data from pgeltestr WHERE id=1"))
+         (data (cl-first (pg-result res :tuple 0))))
+    (should (string= data "Foobles")))
   (pg-exec con "DROP TABLE pgeltestr"))
 
 
