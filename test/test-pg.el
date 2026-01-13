@@ -3074,6 +3074,9 @@ bar$$"))))
                        (funcall scalar-fn "SELECT '1f2'::json")
                      (pg-invalid-text-representation 'ok))))
   (should (eql 'ok (condition-case nil
+                       (funcall scalar-fn "SELECT '{1,2,invalid,4}'::integer[]")
+                     (pg-invalid-text-representation 'ok))))
+  (should (eql 'ok (condition-case nil
                        (funcall scalar-fn "SELECT int2 '10__000'")
                      (pg-invalid-text-representation 'ok))))
   (should (eql 'ok (condition-case nil
