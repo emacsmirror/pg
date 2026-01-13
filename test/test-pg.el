@@ -353,7 +353,7 @@
       (pgtest-add #'pg-test-numeric
                   :skip-variants '(vertica))
       (pgtest-add #'pg-test-numeric-range
-                  :skip-variants '(xata cratedb cockroachdb ydb risingwave questdb clickhouse greptimedb spanner octodb vertica cedardb datafusion immudb stoolap))
+                  :skip-variants '(xata cratedb cockroachdb ydb risingwave questdb clickhouse greptimedb spanner octodb vertica cedardb datafusion immudb stoolap pgsqlite))
       (pgtest-add #'pg-test-prepared
                   :skip-variants '(ydb cratedb)
                   :need-emacs "28")
@@ -1768,7 +1768,13 @@ bar$$"))))
       (should (equal 2 (length vec)))
       (should (pgtest-approx= 44.3 (aref vec 0)))
       (should (pgtest-approx= 8999.5 (aref vec 1))))
-    (should (equal 42 (scalar "SELECT unnest(ARRAY[42])")))))
+    (should (equal 42 (scalar "SELECT unnest(ARRAY[42])")))
+    (should (equal pg-null-marker (scalar "SELECT (ARRAY[1,2,3])[42]")))
+    (should (equal (vector) (scalar "SELECT (ARRAY[10,11,12])[5:42]")))
+    (let* ((res (pg-exec con "SELECT generate_subscripts('[-33:-31]={100,200,300}'::int[], 1)"))
+           (row (pg-result res :tuples)))
+      (should (equal row '((-33) (-32) (-31)))))))
+
 
 ;; TODO: we do not currently handle multidimension arrays correctly
 ;; (should (equal (vector (vector 4 5) (vector 6 7))
