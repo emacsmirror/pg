@@ -297,6 +297,7 @@ test-postgresql11: test-pg.el
 # https://github.com/EnterpriseDB/docker-postgresql
 test-enterprisedb: test-pg.el
 	${DOCKER} run --rm --name edb \
+           --pull=newer \
 	   --publish 5366:5366 \
 	   -e TZ=UTC-7:00 \
 	   -e LANG=en_US.UTF8 \
@@ -440,7 +441,7 @@ test-xata: test-pg.el
 # Note that Timescaledb has a bunch of internal tables (owned by the currently connected user) in
 # schemas named _timescaledb_cache, _timescaledb_catalog, timescaledb_internal and so on. We have
 # code in pg-el to remove these from the list of tables returned by pg-tables.
-test-timescale: test-pg.el
+test-timescaleha: test-pg.el
 	${DOCKER} run --rm --name timescale \
            --pull=newer \
            --publish 5981:5981 \
@@ -453,7 +454,18 @@ test-timescale: test-pg.el
 	PGEL_PORT=5981 $(MAKE) test
 	${DOCKER} stop timescale
 
-#   -d docker.io/timescale/timescaledb:latest-pg17
+test-timescale: test-pg.el
+	${DOCKER} run --rm --name timescale \
+           --pull=newer \
+           --publish 5981:5981 \
+           -e POSTGRES_DB=pgeltestdb \
+           -e POSTGRES_USER=pgeltestuser \
+           -e POSTGRES_PASSWORD=pgeltest \
+           -e PGPORT=5981 \
+           -d docker.io/timescale/timescaledb:latest-pg18
+	sleep 5
+	PGEL_PORT=5981 $(MAKE) test
+	${DOCKER} stop timescale
 
 
 # https://hub.docker.com/r/citusdata/citus
@@ -513,7 +525,7 @@ test-pgduckdb: test-pg.el
            -e PGPORT=5317 \
            -e LANG=en_US.UTF8 \
            -e LC_CTYPE=en_US.UTF8 \
-           -d docker.io/pgduckdb/pgduckdb:18-v1.1.1
+           -d docker.io/pgduckdb/pgduckdb:18-main
 	sleep 5
 	PGURI=postgresql://pgeltestuser:pgeltest@127.0.0.1:5317/pgeltestdb $(MAKE) test
 	${DOCKER} stop pgduckdb
@@ -532,7 +544,7 @@ test-ivorysql: test-pg.el
 	  -e IVORYSQL_DB=pgeltestdb \
 	  -e IVORYSQL_USER=pgeltestuser \
 	  -e IVORYSQL_PASSWORD=pgeltest \
-	  -d docker.io/ivorysql/ivorysql:5.0-ubi8
+	  -d docker.io/ivorysql/ivorysql:5.1-ubi8
 	sleep 5
 	PGEL_PORT=5437 $(MAKE) test
 	${DOCKER} stop ivorydb
@@ -635,7 +647,7 @@ test-cedardb: test-pg.el
            -e CEDAR_DB=pgeltestdb \
            -d docker.io/cedardb/cedardb:latest
 	sleep 10
-	PGURI="postgresql://pgeltestuser:pgeltest@127.0.0.1:6778/pgeltestdb?sslmode=disable" $(MAKE) test
+	PGURI="postgresql://pgeltestuser:pgeltest@127.0.0.1:6778/pgeltestdb" $(MAKE) test
 	${DOCKER} stop cedardb
 
 
@@ -689,6 +701,7 @@ test-documentdb: test-pg.el
 # This behaves exactly like PostgreSQL (which it is forked from).
 test-babelfish: test-pg.el
 	${DOCKER} run --rm --name babelfish \
+          --pull=newer \
           --publish 127.0.0.1:5410:5432 \
           -e POSTGRES_USER=pgeltestuser \
           -e POSTGRES_PASSWORD=pgeltest \
@@ -707,6 +720,7 @@ test-babelfish: test-pg.el
 # TODO: need to move away from the unmaintained bitnami Docker images, perhaps to ghcr.io/icoretech/pgbouncer-docker
 test-pgbouncer-old: test-pg.el
 	${DOCKER} run --rm --name pgbouncer \
+          --pull=newer \
 	  --net host \
 	  -e PGBOUNCER_PORT=6432 \
 	  -e PGBOUNCER_DATABASE=pgeltestdb \
@@ -723,6 +737,7 @@ test-pgbouncer-old: test-pg.el
 # https://github.com/icoretech/pgbouncer-docker/pkgs/container/pgbouncer-docker
 test-pgbouncer: test-pg.el
 	${DOCKER} run --rm --name pgbouncer \
+          --pull=newer \
           -v ./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini \
           -v ./pgbouncer-auth-file.txt:/etc/pgbouncer/pgbouncer-auth-file.txt \
           --net host \
@@ -759,6 +774,9 @@ test-pgcat: test-pg.el
 
 # pgdog bouncer/sharding middleware (same developer as pgcat)
 #
+# We currently don't detect this as a variant, but it sets application_name to "PgDog" in the
+# startup key-value sequence.
+#
 # https://github.com/pgdogdev/pgdog
 test-pgdog: test-pg.el
 	cp pgdog-config.toml pgdog-users.toml /tmp
@@ -786,6 +804,32 @@ test-odyssey: test-pg.el
 	sleep 5
 	PGURI=postgresql://pgeltestuser:pgeltest@127.0.0.1:5633/pgeltestdb $(MAKE) test
 	${DOCKER} stop odyssey
+
+
+# GatewayD firewall/proxy
+# https://docs.gatewayd.io/using-gatewayd/configuration/
+# https://github.com/gatewayd-io/gatewayd
+# https://hub.docker.com/r/gatewaydio/gatewayd
+test-gatewayd: test-pg.el
+	${DOCKER} run --rm --name gatewayd \
+          --pull=newer \
+          --net=host \
+          -e GATEWAYD_CLIENTS_DEFAULT_WRITES_ADDRESS=localhost:5432 \
+          -e GATEWAYD_CLIENTS_DEFAULT_READS_ADDRESS=localhost:5432 \
+          -e POSTGRES_USER=pgeltestuser \
+          -e POSTGRES_PASSWORD=pgeltest \
+          -e POSTGRES_HOST=127.0.0.1 \
+          -d docker.io/gatewaydio/gatewayd:latest run
+	sleep 5
+	PGURI=postgresql://pgeltestuser:pgeltest@127.0.0.1:15432/pgeltestdb $(MAKE) test
+	${DOCKER} stop gatewayd
+# --config /opt/gatewayd.yaml --plugins-config /opt/gatewayd_plugins.yaml
+
+
+# to test: Heimdall Data: An intelligent proxy for caching, failover, and query routing in PostgreSQL setups.
+
+# to test: ShardingSphere-Proxy: Apache ShardingSphere's proxy for distributed PostgreSQL setups, handling sharding and scaling.
+
 
 
 # https://supabase.github.io/supavisor/
@@ -882,7 +926,7 @@ test-cratedb: test-pg.el
           --pull=newer \
           --net host \
           -e CRATE_HEAP_SIZE=1g \
-          -d docker.io/crate:latest -Cnetwork.host=127.0.0.1 -Cdiscovery.type=single-node -Cpsql.port=5789
+          -d docker.io/crate/crate:nightly -Cnetwork.host=127.0.0.1 -Cdiscovery.type=single-node -Cpsql.port=5789
 	sleep 5
 	PGURI="postgresql://crate@127.0.0.1:5789/postgres?read_timeout=1000" $(MAKE) test
 	${DOCKER} stop cratedb
@@ -893,6 +937,8 @@ test-cratedb: test-pg.el
 #
 # Still affected as of 2024-12 by the panic bug https://github.com/cockroachdb/cockroach/issues/104009
 # which was reported in May 2023!
+#
+# https://hub.docker.com/r/cockroachdb/cockroach/
 test-cockroach: test-pg.el
 	${DOCKER} run --rm --name cockroachdb \
           --pull=newer \
@@ -900,10 +946,10 @@ test-cockroach: test-pg.el
           -e COCKROACH_DATABASE=pgeltestdb \
           -e COCKROACH_USER=pgeltestuser \
           -e COCKROACH_PASSWORD=pgeltest \
-          -d docker.io/cockroachdb/cockroach start-single-node
+          -d docker.io/cockroachdb/cockroach:latest start-single-node
 	sleep 10
 	PGURI="postgresql://pgeltestuser:pgeltest@localhost:26257/pgeltestdb?sslmode=require" $(MAKE) test
-
+	${DOCKER} stop cockroachdb
 
 
 # This database (based on PostgreSQL 12.3 but which for some reason claims to have a backend major
@@ -992,6 +1038,7 @@ test-yellowbrick-ce: test-pg.el
 # up sometimes, so we wait a long time before the test.
 test-yellowbrick: test-pg.el
 	${DOCKER} run --rm --name yellowbrick \
+         --pull=newer \
          --publish 127.0.0.1:5689:5432 \
          -e YB_ADMIN_PASSWORD=pgeltest \
          -d docker.io/yellowbrickdata/yb-community-edition:latest --YM_OFF
@@ -1077,6 +1124,7 @@ test-cloudberry: test-pg.el
 
 test-cloudberry2: test-pg.el
 	${DOCKER} run --rm --name cloudberry \
+          --pull=newer \
           --publish 127.0.0.1:5661:5661 \
           -h cdw -e PGPORT=5661 \
           docker.io/scottdolecki/cloudberry:latest
@@ -1122,7 +1170,7 @@ test-ydb: test-pg.el
           -e YDB_USE_IN_MEMORY_PDISKS=true \
           -e YDB_FEATURE_FLAGS=enable_temp_tables \
           -d docker.io/ydbplatform/local-ydb:nightly
-	sleep 5
+	sleep 15
 	PGURI="postgresql://pgeltestuser:pgeltest@localhost:5119/local?read_timeout=100" $(MAKE) test
 	${DOCKER} stop ydb
 
@@ -1135,11 +1183,17 @@ test-ydb: test-pg.el
 # evolutions such as "INTEGER GENERATED ALWAYS AS expression STORED" are not supported.
 # LISTEN/NOTIFY is not supported.
 #
-# TODO: test YSQL_PASSWORD
-# https://docs.yugabyte.com/preview/reference/configuration/yugabyted/
+# https://docs.yugabyte.com/preview/reference/configuration/yugabyted/
+#
+# Unclear why publishing only a limited list of ports does not work
+#          --publish 127.0.0.1:5499:5499 \
+#          --publish 127.0.0.1:7000:7000 \
+#          --publish 127.0.0.1:9000:9000 \
+#          --publish 127.0.0.1:9042:9042 
 test-yugabyte: test-pg.el
 	${DOCKER} run --rm --name yugabyte \
-          --net host --pull=newer \
+          --pull=newer \
+          --net=host \
           -e YSQL_USER=pgeltestuser \
           -e YSQL_PASSWORD=pgeltest \
           -e YSQL_DB=pgeltestdb \
@@ -1151,7 +1205,7 @@ test-yugabyte: test-pg.el
             --enable_pg_parity_early_access \
             --ysql_enable_auth=true \
             --background=false
-	sleep 10
+	sleep 30
 	PGURI=postgresql://pgeltestuser:pgeltest@127.0.0.1:5499/pgeltestdb $(MAKE) test
 	${DOCKER} stop yugabyte
 
@@ -1218,6 +1272,7 @@ test-antdb: test-pg.el
 test-clickhouse: test-pg.el
 	echo '<clickhouse><postgresql_port>5491</postgresql_port><core_dump><size_limit>0</size_limit></core_dump><tcp_connection_close>0</tcp_connection_close></clickhouse>' > /tmp/pgel-config.xml
 	${DOCKER} run --rm --name clickhouse \
+           --pull=newer \
 	   --ulimit nofile=62144:62144 \
 	   --ulimit core=234567:234567 \
 	   -v /tmp/pgel-config.xml:/etc/clickhouse-server/config.d/pgel-config.xml \
@@ -1326,6 +1381,7 @@ test-alloydb: test-pg.el
 # https://hub.docker.com/r/dolthub/doltgresql
 test-doltgres: test-pg.el
 	${DOCKER} run --rm --name doltgres \
+           --pull=newer \
            --publish 127.0.0.1:5489:5432 \
            -e DOLTGRES_USER=pgeltestuser \
            -e DOLTGRES_PASSWORD=pgeltest \
@@ -1404,16 +1460,18 @@ test-spacetimedb: test-pg.el
 
 
 # https://hub.docker.com/r/ravendb/ravendb/
-# https://docs.ravendb.net/7.1/integrations/postgresql-protocol/overview/#enabling-postgresql-support
+# https://docs.ravendb.net/7.2/integrations/postgresql-protocol/overview/#enabling-postgresql-support
 #
 # It seems that the PostgreSQL protocol support requires a licence, so this doesn't work.
+#          -e RAVEN_Setup_Mode=None
+#          -e RAVEN_Features_Availability=Experimental \
+#          -e RAVEN_Integrations_PostgreSQL_Enabled=true \
+#          -e RAVEN_Integrations_PostgreSQL_Port=5433 
 test-ravendb: test-pg.el
 	${DOCKER} run --rm --name ravendb \
-          -e RAVEN_Setup_Mode=None \
-          -e RAVEN_ARGS="--log-to-console" \
-          -e Features_Availability=Experimental \
-          -e Integrations_PostgreSQL_Enabled=true \
-          -e Integrations_PostgreSQL_Port=5433 \
+          --pull=newer \
+          -v ./ravendb_settings.json:/etc/ravendb_settings.json \
+          -e RAVEN_ARGS="--log-to-console --non-interactive -c=/etc/ravendb_settings.json" \
           --publish 127.0.0.1:5433:5433 \
           docker.io/ravendb/ravendb-nightly:ubuntu-latest
 	sleep 5
@@ -1428,12 +1486,12 @@ test-ravendb: test-pg.el
 # 'columns'".
 test-mindsdb: test-pg.el
 	${DOCKER} run --rm --name mindsdb \
+          --pull=newer \
           --net host \
           -e MINDSDB_USERNAME=pgeltestuser \
           -e MINDSDB_PASSWORD=pgeltest \
-          -e MINDSDB_APIS=postgres \
           -e MINDSDB_NO_STUDIO=true \
-          -d docker.io/mindsdb/mindsdb:latest
+          docker.io/mindsdb/mindsdb:latest --help
 	sleep 10
 	echo 'CREATE DATABASE pgeltestdb WITH ENGINE = "postgres", PARAMETERS = { "user": "pgeltestuser", "password": "pgeltest", "host": "localhost", "port": "5432", "database": "pgeltestdb" };' | psql postgresql://pgeltestuser:pgeltest@127.0.0.1:55432/pgeltestdb
 	PGURI=postgresql://pgeltestuser:pgeltest@127.0.0.1:55432/pgeltestdb $(MAKE) test
@@ -1557,6 +1615,7 @@ test-kinetica: test-pg.el
           -d docker.io/kinetica/kinetica-cpu:latest /bin/sh -c "/opt/gpudb/core/bin/gpudb start && sleep 1000"
 	sleep 120   # fantastically slow to start up!
 	PGURI=postgresql://admin:admin@127.0.0.1:5434/kinetica $(MAKE) test
+	${DOCKER} stop kinetica
 
 
 # https://github.com/surrealdb/surrealdb?tab=readme-ov-file#run-using-docker
@@ -1580,11 +1639,16 @@ test-surrealdb: test-pg.el
 # https://github.com/risinglightdb/risinglight
 #
 # This educational database implementation is not very PostgreSQL compatible; it doesn't implement
-# version() for example.
+# version() for example as of v0.20.2 from 2025-12.
 test-risinglight: test-pg.el
-	cd ~/tmp/risinglight && cargo run -- --server --port 5367 &
-	sleep 2
+	$(eval TMPBDIR := $(shell mktemp -d -t risinglight-buildXXXX))
+	(cd ${TMPBDIR} && \
+         git clone --depth 1 https://github.com/risinglightdb/risinglight && \
+         cd risinglight && \
+         cargo run -- --server --port 5367 & )
+	sleep 3
 	PGURI=postgresql://postgres@localhost:5367/postgres $(MAKE) test
+	rm -rf ${TMPBDIR}
 
 
 # ChronDB -- git-backed database
@@ -1605,7 +1669,7 @@ test-pgsqlite: test-pg.el
          git clone --depth 1 https://github.com/erans/pgsqlite && \
          cd pgsqlite && \
          cargo build)
-	(cd ${TMPBDIR}/pgsqlite && PGSQLITE_AUDIT_LOG_QUERIES=true cargo run --bin pgsqlite -- --port 7778 --in-memory & )
+	(cd ${TMPBDIR}/pgsqlite && PGSQLITE_AUDIT_LOG_QUERIES=false cargo run --bin pgsqlite -- --port 7778 --log-level info --in-memory & )
 	sleep 2
 	PGURI=postgresql://pgeltestuser@127.0.0.1:7778/pgeltestdb $(MAKE) test
 	rm -rf ${TMPBDIR}
