@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [0.63] - Unreleased
+
+- Add support for looking up connection passwords using the Emacs auth-source functionality. If
+  variable `pg-use-auth-source` is non-nil and a null value for password is provided to
+  `pg-connect-plist` or `pg-connect-local` (including indirectly via `pg-connect/uri` or
+  `pg-connect/uri`), the password will be looked up in configured auth-sources. If not found, an
+  empty string is used as password.
+
+
 ## [0.62] - 2025-12-26
 
 - New function `pg-table-acl` which returns the access control list for a specified table.

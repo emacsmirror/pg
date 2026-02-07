@@ -1,6 +1,6 @@
 ;;; pg.el --- Socket-level interface to the PostgreSQL database  -*- lexical-binding: t -*-
 
-;; Copyright: (C) 1999-2002, 2022-2025  Eric Marsden
+;; Copyright: (C) 1999-2002, 2022-2026  Eric Marsden
 
 ;; Author: Eric Marsden <eric.marsden@risk-engineering.org>
 ;; Version: 0.62
@@ -82,6 +82,7 @@
 (require 'parse-time)
 (require 'gnutls)
 (require 'network-stream)
+(require 'auth-source)
 
 
 ;; https://www.postgresql.org/docs/current/libpq-envars.html
@@ -89,6 +90,10 @@
   "The application_name sent to the PostgreSQL backend.
 This information appears in queries to the `pg_stat_activity' table
 and (depending on server configuration) in the connection log.")
+
+(defvar pg-use-auth-source t
+  "If non-nil, look up PostgreSQL passwords using auth-source.
+Auth-source will only be used when no password is specified directly.")
 
 ;; https://en.wikipedia.org/wiki/Null_(SQL)
 (defvar pg-null-marker nil
@@ -806,12 +811,9 @@ Uses database DBNAME, user USER and password PASSWORD."
           ;; AUTH_REQ_CLEARTEXT_PASSWORD
           (3
            ;; send a PasswordMessage
-           (let ((password-string (if (functionp password)
-                                      (funcall password)
-                                    password)))
-             (pg--send-char con ?p)
-             (pg--send-uint con (+ 5 (length password-string)) 4)
-             (pg--send-string con password-string))
+           (pg--send-char con ?p)
+           (pg--send-uint con (+ 5 (length password)) 4)
+           (pg--send-string con password)
            (pg-flush con))
 
          ;; AUTH_REQ_CRYPT
@@ -929,7 +931,7 @@ Uses database DBNAME, user USER and password PASSWORD."
 (cl-defun pg-connect-plist (dbname
                             user
                             &key
-                            (password "")
+                            (password nil)
                             (host "localhost")
                             (port 5432)
                             (tls-options nil)
@@ -982,7 +984,20 @@ to use the updated protocol features introduced with PostgreSQL version
                        ;; see https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids
                        (list :alpn-protocols (list "postgresql"))
                        (when cert (list :keylist cert))
-                       (when (listp tls-options) tls-options))))
+                       (when (listp tls-options) tls-options)))
+         (maybe-password
+          (cond ((stringp password)
+                 password)
+                ((functionp password)
+                 (funcall password))
+                ((and (null password)
+                      pg-use-auth-source)
+                 (let ((password (auth-source-pick-first-password :host host :user user :port port)))
+                   (unless password
+                     (warn "Couldn't find PostgreSQL password for user %s on %s:%s with auth-source"
+                           user host port))
+                   password))))
+         (password (or maybe-password "")))
     (when server-variant
       (setf (pgcon-server-variant con) server-variant))
     ;; Emacs supports disabling the Nagle algorithm, i.e. enabling TCP_NODELAY on this connection as
@@ -1020,7 +1035,7 @@ to use the updated protocol features introduced with PostgreSQL version
     (cond (direct-tls
            ;; Here we make a "direct" TLS connection to PostgreSQL, rather than the STARTTLS-like
            ;; connection upgrade handshake. This requires ALPN support in Emacs. This connection
-           ;; mode is only support from PostgreSQL 18.
+           ;; mode is only supported from PostgreSQL 18.
            (unless (gnutls-available-p)
              (signal 'pg-error '("Connecting over TLS requires GnuTLS support in Emacs")))
            (condition-case err
@@ -1029,7 +1044,7 @@ to use the updated protocol features introduced with PostgreSQL version
               (let ((msg (format "TLS error connecting to PostgreSQL: %s"
                                  (error-message-string err))))
                 (signal 'pg-protocol-error (list msg))))))
-          (tls-options 
+          (tls-options
            ;; Classical TLS connections to PostgreSQL are based on a custom STARTTLS-like connection
            ;; upgrade handshake. The frontend establishes an unencrypted network connection to the
            ;; backend over the standard port (normally 5432). It then sends an SSLRequest message,
@@ -1070,7 +1085,7 @@ to use the updated protocol features introduced with PostgreSQL version
 
 (cl-defun pg-connect (dbname user
                              &optional
-                             (password "")
+                             (password nil)
                              (host "localhost")
                              (port 5432)
                              (tls-options nil)
@@ -1125,19 +1140,28 @@ passed to GnuTLS."
                     :tls-options tls-options
                     :direct-tls t))
 
-(cl-defun pg-connect-local (path dbname user &optional (password ""))
+(cl-defun pg-connect-local (path dbname user &optional (password nil))
   "Initiate a connection with the PostgreSQL backend over local Unix socket PATH.
 Connect to the database DBNAME with the username USER, providing
 PASSWORD if necessary. PASSWORD may be either a string, or a
 zero-argument function that returns a string. Return a connection to the
-database (as an opaque type). PASSWORD defaults to an empty string."
+database (as an opaque type)."
   (let* ((buf (generate-new-buffer " *PostgreSQL*"))
          (process (make-network-process :name "postgres"
                                         :buffer buf
                                         :family 'local
                                         :service path
                                         :coding nil))
-         (con (make-pgcon :dbname dbname :process process)))
+         (con (make-pgcon :dbname dbname :process process))
+         (maybe-password
+          (cond ((stringp password)
+                 password)
+                ((functionp password)
+                 (funcall password))
+                ((and (null password)
+                      pg-use-auth-source)
+                 (auth-source-pick-first-password :host host :user user :port port))))
+         (password (or maybe-password "")))
     ;; Save connection info in the pgcon object, for possible later use by pg-cancel
     (setf (pgcon-connect-info con) (list :local path nil dbname user password))
     (with-current-buffer buf
@@ -1803,7 +1827,7 @@ Returns the prepared statement name (a string)."
 (cl-defun pg-bind (con statement-name typed-arguments &key (portal ""))
   "Bind the SQL prepared statement STATEMENT-NAME to TYPED-ARGUMENTS.
 The STATEMENT-NAME should have been returned by function `pg-prepare'.
-TYPE-ARGUMENTS is a list of the form ((42 . \"int4\") (\"foo\" . \"text\")).
+TYPED-ARGUMENTS is a list of the form ((42 . \"int4\") (\"foo\" . \"text\")).
 Uses PostgreSQL connection CON."
   (let* ((ce (pgcon-client-encoding con))
          (argument-values (mapcar #'car typed-arguments))
@@ -3805,6 +3829,8 @@ Uses database connection CON."
   "Return the comment on TABLE in a PostgreSQL database.
 TABLE can be a string or a schema-qualified name. Uses database connection CON."
   (pcase (pgcon-server-variant con)
+    ;; Comment metadata is unsupported by CrateDB as of 2025-12; here is the tracking issue
+    ;; https://github.com/crate/crate/issues/13748
     ('cratedb nil)
     ('questdb nil)
     ('spanner nil)
