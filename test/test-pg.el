@@ -1,8 +1,13 @@
 ;;; Tests for the pg.el library   -*- coding: utf-8; lexical-binding: t; -*-
 ;;
 ;; Author: Eric Marsden <eric.marsden@risk-engineering.org>
-;; Copyright: (C) 2022-2025  Eric Marsden
+;; Copyright: (C) 2022-2026  Eric Marsden
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+
+
+;; Work at end 2025 on defining "PostgreSQL compatibility" more precisely and in a granular manner,
+;; as a compatibility matrix:
+;; https://wiki.postgresql.org/wiki/PGConf.EU_2025_Establishing_the_PostgreSQL_standard_What_is_Postgres_compatible
 
 
 (require 'cl-lib)
@@ -1044,7 +1049,7 @@ bar$$"))))
         (pg-exec con sql)
         (should (pgtest-have-table con "count_test"))
         (should (member "val" (pg-columns con "count_test")))
-        (unless (member (pgcon-server-variant con) '(cratedb risingwave ydb materialize))
+        (unless (member (pgcon-server-variant con) '(cratedb risingwave ydb materialize datafusion))
           (pg-exec con "TRUNCATE TABLE count_test"))
         (dotimes (i count)
           (pg-exec-prepared con "INSERT INTO count_test VALUES($1, $2)"
@@ -1774,7 +1779,6 @@ bar$$"))))
     (let* ((res (pg-exec con "SELECT generate_subscripts('[-33:-31]={100,200,300}'::int[], 1)"))
            (row (pg-result res :tuples)))
       (should (equal row '((-33) (-32) (-31)))))))
-
 
 ;; TODO: we do not currently handle multidimension arrays correctly
 ;; (should (equal (vector (vector 4 5) (vector 6 7))
