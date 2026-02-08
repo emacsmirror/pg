@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [0.63] - Unreleased
+## [0.63] - 2026-02-08
 
 - Add support for looking up connection passwords using the Emacs auth-source functionality. If
   variable `pg-use-auth-source` is non-nil and a null value for password is provided to
