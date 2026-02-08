@@ -758,7 +758,7 @@ Uses database DBNAME, user USER and password PASSWORD."
         (setf (pgcon-minor-protocol-version con) (min protocol-minor-supported 2))
         ;; read the list of protocol options not supported by the server
         (dotimes (_ unrec-option-count)
-          (warn "PostgreSQL backend does not support the option %s" (pg--read-string con 4096)))))
+          (display-warning 'pg-el (format "PostgreSQL backend does not support the option %s" (pg--read-string con 4096))))))
 
      ;; BackendKeyData
      (?K
@@ -994,8 +994,8 @@ to use the updated protocol features introduced with PostgreSQL version
                       pg-use-auth-source)
                  (let ((password (auth-source-pick-first-password :host host :user user :port port)))
                    (unless password
-                     (warn "Couldn't find PostgreSQL password for user %s on %s:%s with auth-source"
-                           user host port))
+                     (display-warning 'pg-el
+                                      (format "Couldn't find PostgreSQL password for user %s on %s:%s with auth-source" user host port)))
                    password))))
          (password (or maybe-password "")))
     (when server-variant
